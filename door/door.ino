@@ -1,78 +1,84 @@
+/* Author: David Wang
+
+   Automatic Door Using 28BYJ-48 Stepper motor, HC-SR04 Ultrasonic sensor, and HC-SR501 PIR
+   motion sensor.
+*/
+
 #include <Stepper.h>
-#include <elapsedMillis.h>
 
 #define STEPS_PER_MOTOR_REVOLUTION 32
-#define STEPS_PER_OUTPUT_REVOLUTION 32 * 64  //2048
+//#define STEPS_PER_OUTPUT_REVOLUTION 32 * 64  //2048
+#define STEPS_TO_END 15 //STEPS TO OPEN DOOR
 
-Stepper small_stepper(STEPS_PER_MOTOR_REVOLUTION, 8, 10, 9, 11);
+Stepper stepper(STEPS_PER_MOTOR_REVOLUTION, 8, 10, 9, 11);
 
 int  Steps2Take;
+int startRev = 0; //INITIAL COUNTER FOR STEPS
 
-const int trigPin = 6;
-const int echoPin = 7;
+const int trigPin = 6; //ULTRASONIC TRIGGER PIN
+const int echoPin = 2; //ULTRASONIC ECHO PIN
+const int lockPin = 1; //LOCK DOOR BUTTON
+const int pirPin = 13; //PIR MOTION SENSOR PIN
+const int buzzer = 3; //BUZZER PIN
 
-int lockPin = 12;
-int pirPin = 13;
-int pirValue;
-int lockValue;
-int doorValue;
+int pirValue; //PIR MOTION SENSOR VALUE
+int lockValue; //LOCK DOOR VALUE
 
-int STATE;
+int STATE; //STATE MACHINE VARIABLE
 
-const int idle = 0;
+const int idle = 0; //STATES
 const int openDoor = 1;
 const int stayOpen = 2;
 const int closeDoor = 3;
-const int lockDoor = 4;
+const int reOpen = 4;
+const int lockDoor = 5;
 
+volatile long distance; //ULTRASONIC DISTANCE + INTERRUPT VARIABLES
+volatile long startTime;
+volatile long endTime;
+
+/////////////////////////////////////////////////////////////////////////////////////////
 void setup() {
 
+  Serial.begin(9600);
+
+  pinMode(trigPin, OUTPUT);
   pinMode(pirPin, INPUT);
   pinMode(lockPin, INPUT);
   pinMode(echoPin, INPUT);
-  STATE = idle;
+  pinMode(buzzer, OUTPUT);
 
-  Serial.begin(9600);
+  attachInterrupt(digitalPinToInterrupt(2), risingEdge, RISING); //ATTACH INTERRUPT PINS TO ULTRASONIC ECHO PIN
+  attachInterrupt(digitalPinToInterrupt(2), fallingEdge, FALLING);
+
+  stepper.setSpeed(300); //STEPPER MOTOR SPEED
+
+  STATE = idle; //INITIAL STATE
+
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////
 void loop() {
 
-  long duration, inches, cm;
-
-  pinMode(trigPin, OUTPUT);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(trigPin, LOW); //SETTING ULTRASONIC TRIGGER TO DETECT DISTANCE DURATION
   delayMicroseconds(2);
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
 
-  duration = pulseIn(echoPin, HIGH);
-
-  inches = microsecondsToInches(duration);
-  cm = microsecondsToCentimeters(duration);
-
-  if (duration < 23200) { //23200 = 4m
-    Serial.print(inches);
-    Serial.print("in, ");
-    Serial.print(cm);
-    Serial.print("cm");
-    Serial.println();
-  }
-  else {
-    Serial.print("Out of Range");
-  }
+  distance = pulseIn(echoPin, HIGH); //DISTANCE = DISTANCE DURATION
 
   pirValue = digitalRead(pirPin);
   lockValue = digitalRead(lockPin);
-  doorValue = 0;
 
-  doorState();
+  doorState(); //STATE MACHINE
 
-  delay(200);
+  Serial.println(distance); //TESTING DISTANCE
 }
 
-void doorState() {
+/////////////////////////////////////////////////////////////////////////////////////////
+void doorState() { //STATE MACHINE
 
   switch (STATE) { //CHANGE STATES
 
@@ -100,10 +106,28 @@ void doorState() {
       break;
 
     case closeDoor:
-      if (pirValue == HIGH)
-        STATE = openDoor;
-      else
+      if (distance > 500 && startRev < STEPS_TO_END)
+        STATE = closeDoor;
+      else if (startRev >= STEPS_TO_END)
         STATE = idle;
+      else {
+        STATE = reOpen;
+
+        //BUZZ WHEN ULTRASONIC DETECTS SOMETHING UNDER 500
+        tone(buzzer, 1000); //1 kHz SOUND SIGNAL
+        delay(500); //PLAY FOR THIS LONG
+        noTone(buzzer); //STOP SOUND
+        //delay(100); //STOP BUZZER
+      }
+      break;
+
+    case reOpen:
+      if (pirValue == HIGH)
+        STATE = stayOpen;
+      else if (distance > 500)
+        STATE = reOpen;
+      else
+        STATE = closeDoor;
       break;
 
     case lockDoor:
@@ -114,17 +138,19 @@ void doorState() {
       break;
   }
 
+  /////////////////////////////////////////////////////////////////////////////////////////
   switch (STATE) { //STATE FUNCTIONS
 
     case idle:
+      startRev = 0;
       delay(200);
       break;
 
     case openDoor:
-      Steps2Take  =  STEPS_PER_OUTPUT_REVOLUTION ;
-      small_stepper.setSpeed(1000);
-      small_stepper.step(Steps2Take);
+      Steps2Take  =  STEPS_PER_MOTOR_REVOLUTION * STEPS_TO_END ;
+      stepper.step(Steps2Take);
       delay(1000);
+      startRev = 0;
       break;
 
     case stayOpen:
@@ -132,9 +158,18 @@ void doorState() {
       break;
 
     case closeDoor:
-      Steps2Take  =  - STEPS_PER_OUTPUT_REVOLUTION;
-      small_stepper.setSpeed(1000);
-      small_stepper.step(Steps2Take);
+      if (startRev == 0)
+        Steps2Take = 0;
+      else
+        Steps2Take  = - STEPS_PER_MOTOR_REVOLUTION;
+      stepper.step(Steps2Take);
+      startRev++;
+      break;
+
+    case reOpen:
+      Steps2Take  = STEPS_PER_MOTOR_REVOLUTION * startRev;
+      stepper.step(Steps2Take);
+      startRev = 0;
       break;
 
     case lockDoor:
@@ -142,22 +177,17 @@ void doorState() {
       break;
 
   }
-
 }
 
-long microsecondsToInches(long microseconds) {
-  // According to Parallax's datasheet for the PING))), there are
-  // 73.746 microseconds per inch (i.e. sound travels at 1130 feet per
-  // second).  This gives the distance travelled by the ping, outbound
-  // and return, so we divide by 2 to get the distance of the obstacle.
-  // See: http://www.parallax.com/dl/docs/prod/acc/28015-PING-v1.3.pdf
-  return microseconds / 74 / 2;
+/////////////////////////////////////////////////////////////////////////////////////////
+void risingEdge() { //INTERRUPT
+  endTime = 0;
+  startTime = millis();
 }
 
-long microsecondsToCentimeters(long microseconds) {
-  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
-  // The ping travels out and back, so to find the distance of the
-  // object we take half of the distance travelled.
-  return microseconds / 29 / 2;
+/////////////////////////////////////////////////////////////////////////////////////////
+void fallingEdge() { //INTERRUPT
+  endTime = millis();
+  distance = endTime - startTime;
 }
 
