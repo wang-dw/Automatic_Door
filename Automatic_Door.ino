@@ -184,9 +184,10 @@ void doorState() { //STATE MACHINE
       break;
 
     case reOpen:
-      Steps2Take  = STEPS_PER_MOTOR_REVOLUTION * startRev;
+      Steps2Take  = STEPS_PER_MOTOR_REVOLUTION * startRev - 1; //opens too much
       stepper.step(Steps2Take);
       startRev = 0;
+      delay(200);
       break;
 
     case lockDoor:
