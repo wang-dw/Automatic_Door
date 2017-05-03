@@ -17,12 +17,15 @@ int startRev = 0; //INITIAL COUNTER FOR STEPS
 
 const int trigPin = 6; //ULTRASONIC TRIGGER PIN
 const int echoPin = 2; //ULTRASONIC ECHO PIN
-const int lockPin = 1; //LOCK DOOR BUTTON
+const int lockPin = 4; //LOCK DOOR BUTTON
 const int pirPin = 13; //PIR MOTION SENSOR PIN
 const int buzzer = 3; //BUZZER PIN
 
 int pirValue; //PIR MOTION SENSOR VALUE
 int lockValue; //LOCK DOOR VALUE
+
+int buttonState = 0; //LOCK DOOR STATE
+int lastButtonState = 0;
 
 int STATE; //STATE MACHINE VARIABLE
 
@@ -53,6 +56,8 @@ void setup() {
 
   stepper.setSpeed(300); //STEPPER MOTOR SPEED
 
+  lockValue = 0;
+  
   STATE = idle; //INITIAL STATE
 
 }
@@ -70,7 +75,19 @@ void loop() {
   distance = pulseIn(echoPin, HIGH); //DISTANCE = DISTANCE DURATION
 
   pirValue = digitalRead(pirPin);
-  lockValue = digitalRead(lockPin);
+  buttonState = digitalRead(lockPin);
+
+  if ( buttonState != lastButtonState) {
+    if (buttonState == HIGH) {
+      lockValue = !lockValue;
+    }
+    else {
+      //nothing
+    }
+    delay(50);
+  }
+
+  lastButtonState = buttonState;
 
   doorState(); //STATE MACHINE
 
