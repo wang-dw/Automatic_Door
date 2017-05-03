@@ -123,7 +123,7 @@ void doorState() { //STATE MACHINE
       break;
 
     case closeDoor:
-      if (distance > 500 && startRev < STEPS_TO_END)
+      if (distance > 550 && startRev < STEPS_TO_END) //500 original distance
         STATE = closeDoor;
       else if (startRev >= STEPS_TO_END)
         STATE = idle;
@@ -141,7 +141,7 @@ void doorState() { //STATE MACHINE
     case reOpen:
       if (pirValue == HIGH)
         STATE = stayOpen;
-      else if (distance > 500)
+      else if (distance < 550)
         STATE = reOpen;
       else
         STATE = closeDoor;
